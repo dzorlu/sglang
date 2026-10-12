@@ -9,7 +9,7 @@ import time
 import uuid
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 
 
 class ThinkingMode(str, Enum):
@@ -1213,15 +1213,22 @@ class OpenAIServingChat(OpenAIServingBase):
                 tool_call_constraint = ("json_schema", json_schema)
 
         # When input_ids are provided, skip template tokenization entirely;
-        # only stop tokens and tool_call_constraint are needed.
+        # only stop tokens and tool_call_constraint are needed. The media in
+        # the messages still travels with the request: a pre-tokenized client
+        # (the miles TITO session server) renders one placeholder per image
+        # and the multimodal processor expands it in place, keeping every
+        # other id verbatim (SGLANG_MM_AVOID_RETOKENIZE).
         if request.input_ids is not None:
+            image_data, video_data, audio_data, modalities = (
+                self._collect_media_for_pretokenized(request) if is_multimodal else ([], [], [], [])
+            )
             result = MessageProcessingResult(
                 prompt="",
                 prompt_ids=request.input_ids,
-                image_data=None,
-                audio_data=None,
-                video_data=None,
-                modalities=[],
+                image_data=image_data if image_data else None,
+                audio_data=audio_data if audio_data else None,
+                video_data=video_data if video_data else None,
+                modalities=modalities,
                 stop=request.stop or [],
             )
         elif self.template_manager.chat_template_name is None:
@@ -1243,6 +1250,25 @@ class OpenAIServingChat(OpenAIServingBase):
         result.require_reasoning = thinking_mode
         result.skip_special_tokens = request.skip_special_tokens
         return result
+
+    def _collect_media_for_pretokenized(
+        self, request: ChatCompletionRequest
+    ) -> Tuple[List[Any], List[Any], List[Any], List[str]]:
+        """The images, videos and audio of a request whose prompt arrives as
+        ``input_ids``: the same extraction the template path runs, without
+        rendering. The client's ids carry one placeholder per item."""
+        image_data: List[Any] = []
+        video_data: List[Any] = []
+        audio_data: List[Any] = []
+        modalities: List[str] = []
+        for message in request.messages:
+            msg_dict = message.model_dump()
+            if msg_dict.get("content") is None:
+                msg_dict["content"] = ""
+            process_content_for_template_format(
+                msg_dict, "openai", image_data, video_data, audio_data, modalities
+            )
+        return image_data, video_data, audio_data, modalities
 
     def _apply_jinja_template(
         self,
