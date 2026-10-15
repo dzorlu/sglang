@@ -2159,6 +2159,15 @@ class BaseMultimodalProcessor(ABC):
                 )
                 raise error from rollback_errors[0]
             raise
+        # fork-only (dzorlu/sglang tito-sglang-integration, release the mm GPU cache):
+        # the source tensors are dead after the hand-off; drop the rollback
+        # list's references and give their blocks back to the driver so this
+        # process does not keep the largest request it ever served resident
+        # on the GPU.
+        updates.clear()
+        tensor = fields = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return mm_items
 
     async def process_and_combine_mm_data_async(
