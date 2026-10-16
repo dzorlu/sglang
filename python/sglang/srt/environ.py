@@ -750,6 +750,12 @@ class Envs:
     # Tool calling and native web search
     # ===================================================================
     SGLANG_FORWARD_UNKNOWN_TOOLS = EnvBool(False)
+    # The glm47 tool-call parser constrains every chat request with a grammar
+    # built from the request's `tools` (FunctionCallParser.use_full_assistant_
+    # constraint), so the model can only name declared tools. Set to disable
+    # it and sample GLM unconstrained, like the other parsers; pair with
+    # SGLANG_FORWARD_UNKNOWN_TOOLS when the client resolves tool names itself.
+    SGLANG_GLM47_DISABLE_FULL_ASSISTANT_CONSTRAINT = EnvBool(False)
     # Native web search (Exa). EXA_API_KEY is the vendor BYOK credential
     # (kept as-is, not renamed to SGLANG_*); the SGLANG_EXA_* knobs tune the
     # request defaults for the built-in GPT-OSS web_search tool.
