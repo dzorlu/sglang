@@ -136,9 +136,8 @@ class FunctionCallParser:
             raise ValueError(f"Unsupported tool_call_parser: {tool_call_parser}")
 
         if isinstance(detector, Glm47MoeDetector):
-            detector.use_full_assistant_constraint = (
-                not envs.SGLANG_GLM47_DISABLE_FULL_ASSISTANT_CONSTRAINT.get()
-                and not any(tool.function.strict for tool in tools)
+            detector.use_full_assistant_constraint = not any(
+                tool.function.strict for tool in tools
             )
         if isinstance(tool_choice, dict):
             tool_choice = ToolChoice(function={"name": tool_choice["name"]})
