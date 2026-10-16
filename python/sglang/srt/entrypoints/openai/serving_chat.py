@@ -279,6 +279,9 @@ class OpenAIServingChat(OpenAIServingBase):
         super().__init__(tokenizer_manager)
         self.template_manager = template_manager
         self.tool_call_parser = self.tokenizer_manager.config_value("tool_call_parser")
+        self.tool_call_constraint = self.tokenizer_manager.config_value(
+            "tool_call_constraint"
+        )
         self.reasoning_parser = self.tokenizer_manager.config_value("reasoning_parser")
         self.default_chat_template_kwargs = (
             get_serving().default_chat_template_kwargs or {}
@@ -1325,11 +1328,18 @@ class OpenAIServingChat(OpenAIServingBase):
         tool_call_constraint = None
 
         effective_tools = self._effective_tools(request)
+        # --tool-call-constraint none: an auto request is sampled without any
+        # parser-derived grammar and parsed afterwards; required and named
+        # tool choices still constrain.
+        auto_unconstrained = self.tool_call_constraint == "none" and (
+            request.tool_choice is None or request.tool_choice == "auto"
+        )
         # Only tool-bearing requests get the full-assistant EBNF: its terminal
         # state finishes a request even under ignore_eos.
         glm_constraint = (
             self.tool_call_parser == "glm47"
             and bool(effective_tools)
+            and not auto_unconstrained
             and not any(tool.function.strict for tool in effective_tools)
         )
         if glm_constraint:
@@ -1359,7 +1369,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 ] or None
             elif request.tools:
                 tools = [item.model_dump() for item in request.tools]
-            if self.tool_call_parser and not glm_constraint:
+            if self.tool_call_parser and not glm_constraint and not auto_unconstrained:
                 parser = FunctionCallParser(
                     effective_tools,
                     self.tool_call_parser,
