@@ -189,7 +189,12 @@ class LoRAInfo:
 
 @dataclass
 class LoRAHooks:
-    """Hook callbacks for injecting LoRA deltas into the MoE pipeline."""
+    """Hook callbacks for injecting LoRA deltas into the MoE pipeline.
+
+    Dropped route IDs remain negative. Hooks must skip those routes before
+    reading their payloads or scores; private inactive intermediates may be
+    uninitialized and routing scores are passed without a sanitized copy.
+    """
 
     after_gate_up: (
         Callable[[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], None] | None
@@ -326,6 +331,7 @@ def _add_lora_gate_up_delta(
     r = lora_info.max_lora_rank
     gate_up_a = lora_info.gate_up_lora_a_weights
     gate_up_b = lora_info.gate_up_lora_b_weights
+
     if lora_info.experts_shared_outer_loras and not lora_info.lora_use_virtual_experts:
         gate_up_a = gate_up_a.expand(-1, lora_info.num_experts, -1, -1)
 
@@ -344,8 +350,6 @@ def _add_lora_gate_up_delta(
                 "virtual-expert MoE LoRA does not support padded Marlin outputs"
             )
         lora_a_stacked = [gate_up_a[:, :, :r, :], gate_up_a[:, :, r : 2 * r, :]]
-        # B halves are also the tuple form the virtual-experts kernel wants
-        # (one shrink at K=2*r, two expands at K=r each).
         lora_b_stacked = [
             gate_up_b[:, :, :inter_size, :],
             gate_up_b[:, :, inter_size:, :],
@@ -359,7 +363,7 @@ def _add_lora_gate_up_delta(
             output=intermediate_cache,
             hidden_states=hidden_states,
             lora_a=gate_up_a,
-            lora_b=tuple(lora_b_stacked) if is_gated else gate_up_b,
+            lora_b=gate_up_b,
             topk_ids=topk_ids,
             topk_weights=topk_weights,
             token_lora_mapping=token_lora_mapping,
@@ -367,6 +371,8 @@ def _add_lora_gate_up_delta(
             experts_shared_outer_loras_a=lora_info.experts_shared_outer_loras,
             experts_shared_outer_loras_b=False,
             routing_cache=routing_cache,
+            adapter_enabled=lora_info.adapter_enabled,
+            a_output_slices=2 if is_gated else 1,
         )
     else:
         blk = _get_moe_lora_block_config(r)
@@ -434,8 +440,6 @@ def _add_lora_down_delta(
     if inter_size != intermediate_input.shape[-1]:
         intermediate_input = intermediate_input[:, :inter_size]
     if lora_info.experts_shared_outer_loras and not lora_info.lora_use_virtual_experts:
-        # fused_moe_lora requires B's expert_dim to match A's; expand the
-        # shared B view.
         down_lora_b = down_lora_b.expand(-1, lora_info.num_experts, -1, -1)
 
     if lora_info.lora_use_virtual_experts:
@@ -451,6 +455,7 @@ def _add_lora_down_delta(
             experts_shared_outer_loras_a=False,
             experts_shared_outer_loras_b=lora_info.experts_shared_outer_loras,
             routing_cache=routing_cache,
+            adapter_enabled=lora_info.adapter_enabled,
         )
     else:
         blk = _get_moe_lora_block_config(lora_info.max_lora_rank)

@@ -77,7 +77,7 @@ class FusedMoEWithLoRAInplaceTest(unittest.TestCase):
         from sglang.srt.lora.layers import FusedMoEWithLoRA
 
         base_layer = _make_base_layer(quant_method)
-        lora_backend = types.SimpleNamespace()
+        lora_backend = types.SimpleNamespace(name="triton")
         self.assertTrue(base_layer.moe_runner_config.inplace)
         layer = FusedMoEWithLoRA(base_layer, lora_backend)
         return layer, base_layer
@@ -122,7 +122,9 @@ class FusedMoEWithLoRAOwnerPartitionTest(unittest.TestCase):
         from sglang.srt.lora.layers import FusedMoEWithLoRA
 
         base_layer = _make_base_layer()
-        layer = FusedMoEWithLoRA(base_layer, types.SimpleNamespace())
+        layer = FusedMoEWithLoRA(
+            base_layer, types.SimpleNamespace(name="triton", is_moe_lora=False)
+        )
         for name in ("moe_tp_rank", "moe_tp_size", "moe_ep_rank", "moe_ep_size"):
             self.assertEqual(getattr(layer, name), getattr(base_layer, name), name)
 
