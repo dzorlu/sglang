@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from sglang.srt.configs.shared_experts import SharedExpertsConfig
 from sglang.srt.eplb.expert_location_dispatch import ExpertLocationDispatchInfo
 from sglang.srt.layers.moe import hash_topk as hash_topk_module
 from sglang.srt.layers.moe import topk as topk_module
@@ -12,7 +13,7 @@ from sglang.srt.layers.moe.topk import (
     StandardTopKOutput,
 )
 from sglang.srt.models.deepseek_v2 import DeepseekV2MoE
-from sglang.srt.runtime_context import get_parallel
+from sglang.srt.runtime_context import get_model, get_parallel
 from sglang.srt.server_args import ServerArgs, set_global_server_args_for_scheduler
 from sglang.srt.state_capturer.routed_experts import (
     disable_routed_experts_capture_for_draft,
@@ -27,7 +28,10 @@ def _set_dummy_server_args():
     set_global_server_args_for_scheduler(ServerArgs(model_path="dummy"))
 
 
-def test_hash_topk_remaps_per_rank_fused_shared_slots(monkeypatch):
+@pytest.mark.parametrize("use_aiter", [False, True])
+def test_hash_topk_remaps_per_rank_fused_shared_slots(monkeypatch, use_aiter):
+    # Hash routing leaves scaling to the MoE epilogue, including on AITER.
+    monkeypatch.setattr(topk_module, "_use_aiter", use_aiter)
     monkeypatch.setattr(hash_topk_module, "_is_xpu", False)
     monkeypatch.setattr(
         hash_topk_module, "has_per_rank_fused_shared_slots", lambda *_args: True
@@ -42,14 +46,16 @@ def test_hash_topk_remaps_per_rank_fused_shared_slots(monkeypatch):
 
     monkeypatch.setattr(get_resources(), "expert_distribution_recorder", FakeRecorder())
 
-    topk = HashTopK(
-        topk=3,
-        num_experts=256,
-        num_fused_shared_experts=1,
-        vocab_size=2,
-        scoring_func="sqrtsoftplus",
-        routed_scaling_factor=2.5,
-    )
+    with get_model().override(
+        shared_experts=SharedExpertsConfig(num_fused_shared_experts=1)
+    ):
+        topk = HashTopK(
+            topk=2,
+            num_experts=256,
+            vocab_size=2,
+            scoring_func="sqrtsoftplus",
+            routed_scaling_factor=2.5,
+        )
     with torch.no_grad():
         topk.tid2eid.copy_(torch.tensor([[0, 65], [63, 127]], dtype=torch.int32))
 
@@ -108,7 +114,6 @@ def test_hash_topk_captures_logical_expert_ids(monkeypatch):
     topk = HashTopK(
         topk=2,
         num_experts=8,
-        num_fused_shared_experts=0,
         vocab_size=2,
         scoring_func="sqrtsoftplus",
         layer_id=3,
@@ -155,7 +160,6 @@ def test_hash_topk_capture_masks_padded_tokens(monkeypatch):
     topk = HashTopK(
         topk=2,
         num_experts=8,
-        num_fused_shared_experts=0,
         vocab_size=2,
         scoring_func="sqrtsoftplus",
         layer_id=4,
@@ -191,7 +195,6 @@ def test_hash_topk_capture_can_be_disabled(monkeypatch):
     topk = HashTopK(
         topk=2,
         num_experts=8,
-        num_fused_shared_experts=0,
         vocab_size=2,
         layer_id=0,
     )
@@ -210,7 +213,6 @@ def test_draft_hash_topk_capture_is_disabled():
     topk = HashTopK(
         topk=2,
         num_experts=8,
-        num_fused_shared_experts=0,
         vocab_size=2,
         layer_id=0,
     )
@@ -226,13 +228,15 @@ def test_hash_topk_empty_output_keeps_per_rank_shared_slot(monkeypatch):
         hash_topk_module, "has_per_rank_fused_shared_slots", lambda *_args: True
     )
 
-    topk = HashTopK(
-        topk=7,
-        num_experts=256,
-        num_fused_shared_experts=1,
-        vocab_size=2,
-        scoring_func="softmax",
-    )
+    with get_model().override(
+        shared_experts=SharedExpertsConfig(num_fused_shared_experts=1)
+    ):
+        topk = HashTopK(
+            topk=6,
+            num_experts=256,
+            vocab_size=2,
+            scoring_func="softmax",
+        )
 
     output = topk.empty_topk_output(torch.device("cpu"))
 
@@ -269,6 +273,7 @@ def test_deepep_empty_forward_does_not_append_shared_slot_twice():
         experts=FakeExperts(),
         alt_stream=None,
         routed_scaling_factor=1.0,
+        routed_scaling_factor_fused_in_topk=True,
     )
 
     hidden_states = torch.empty((0, 4), dtype=torch.float32)

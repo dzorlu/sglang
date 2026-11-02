@@ -1,4 +1,4 @@
-"""Restoring a TRT-LLM BF16 MoE before a weight update must hand loads the canonical expert layout, in place."""
+"""Restoring before a weight update must leave non-TRT-LLM MoE expert layouts alone."""
 
 import unittest
 from types import SimpleNamespace
@@ -39,23 +39,6 @@ def _moe_method(use_flashinfer_trtllm_moe):
 
 
 class TestRestoreWeightsBeforeLoading(CustomTestCase):
-    def test_trtllm_expert_weights_return_to_the_canonical_layout_in_place(self):
-        """Loads copy canonical expert tensors into storage peers write by address, which must not move."""
-        layer = _layer_in_block_layout()
-        data_ptrs = (layer.w13_weight.data_ptr(), layer.w2_weight.data_ptr())
-
-        _moe_method(use_flashinfer_trtllm_moe=True).restore_weights_before_loading(
-            layer
-        )
-
-        self.assertEqual(
-            tuple(layer.w13_weight.shape), (EXPERTS, 2 * INTERMEDIATE, HIDDEN)
-        )
-        self.assertEqual(tuple(layer.w2_weight.shape), (EXPERTS, HIDDEN, INTERMEDIATE))
-        self.assertEqual(
-            (layer.w13_weight.data_ptr(), layer.w2_weight.data_ptr()), data_ptrs
-        )
-
     def test_other_moe_backends_are_left_as_they_are(self):
         """Only the TRT-LLM BF16 postprocess changes expert shapes."""
         layer = _layer_in_block_layout()

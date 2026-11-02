@@ -40,7 +40,7 @@ from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.communicator_patch import COMMUNICATOR_MODULES
 from sglang.test.test_utils import CustomTestCase
 
-register_cpu_ci(est_time=5, suite="base-a-test-cpu")
+register_cpu_ci(est_time=12, suite="base-a-test-cpu")
 
 
 @pytest.fixture(autouse=True)
@@ -114,6 +114,7 @@ class TestDPAttentionBackendContract(CustomTestCase):
                 pool = LoRAMemoryPool.__new__(LoRAMemoryPool)
                 pool.max_loras_per_batch = 3
                 pool.uid_to_buffer_id = {None: 0, "adapter": 1}
+                pool.invalid_uids = set()
                 manager = LoRAManager.__new__(LoRAManager)
                 manager.attn_dp_enabled = attn_dp_enabled
                 manager.max_loras_per_batch = 3
@@ -286,7 +287,7 @@ def test_communicator_publishes_layout_at_each_transition(
 def test_manager_uses_current_dp_cuda_graph_eligibility(can_run_decode_cuda_graph):
     manager = LoRAManager.__new__(LoRAManager)
     manager.attn_dp_enabled = True
-    manager.max_bs_in_cuda_graph = 4
+    manager.max_bs_in_decode_cuda_graph = 4
     tokens = torch.zeros(2, dtype=torch.int64)
     forward_batch = ForwardBatch(
         forward_mode=ForwardMode.DECODE,

@@ -6,11 +6,11 @@ from functools import cache
 import torch
 from torch import nn
 
-from sglang.kernels.ops.attention.log_scaling_tau import (
-    apply_log_scaling_tau as _apply_log_scaling_tau,
-)
 from sglang.kernels.ops.attention.score_mod import (
     relative_bias_score_mod as triton_relative_bias_score_mod,
+)
+from sglang.kernels.ops.elementwise.row_scale import (
+    apply_log_scaling_tau as _apply_log_scaling_tau,
 )
 from sglang.kernels.ops.gemm.inkling_rel_proj import rel_proj_small_t
 from sglang.kernels.ops.memory.row_compact import row_compact_bf16
